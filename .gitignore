@@ -1,3 +1,4 @@
+
 # Compiled Lua sources
 luac.out
 
@@ -38,4 +39,63 @@ luac.out
 *.i*86
 *.x86_64
 *.hex
+
+=======
+# Fish It! Script Hub - .gitignore
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+test/
+*.test.lua
+
+# Private/Secret Files
+secrets/
+private/
+*.key
+*.pem
+config.local.lua
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Compiled / Build
+build/
+dist/
+*.exe
+*.dll
+
+# Dependencies (if using)
+node_modules/
+vendor/
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+temp/
+cache/
+
+# Personal notes
+notes.txt
+todo.txt
+*.personal.*
 
