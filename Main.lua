@@ -1,17 +1,40 @@
 --[[
-    Fish It Script Hub - Main.lua
-    Working Version - Tested & Verified
-    Struktur Modular untuk easy maintenance
+    Fish It! Script Hub - Main.lua
+    Entry Point - Loads all modules
+    GitHub: fahmi1804/FishItScriptHub
 ]]
 
 repeat task.wait() until game:IsLoaded()
 
 -- Anti double load
-if _G.FishItLoaded then
-    warn("Script already running!")
-    return
+if _G.FishItHubLoaded then
+    warn("[Fish It!] Already loaded!")
+    local gui = game.Players.LocalPlayer.PlayerGui:FindFirstChild("FishItHub")
+    if gui then gui:Destroy() end
+    task.wait(0.5)
 end
-_G.FishItLoaded = true
+_G.FishItHubLoaded = true
+
+print("[Fish It!] Loading modules...")
+
+-- Base URL
+local BASE_URL = "https://raw.githubusercontent.com/fahmi1804/FishItScriptHub/main/"
+
+-- Load function
+local function LoadModule(path)
+    local success, result = pcall(function()
+        return loadstring(game:HttpGet(BASE_URL .. path))()
+    end)
+    
+    if success then
+        print("[Fish It!] ✓ Loaded: " .. path)
+        return result
+    else
+        warn("[Fish It!] ✗ Failed: " .. path)
+        warn(result)
+        return nil
+    end
+end
 
 -- Services
 local Players = game:GetService("Players")
@@ -20,8 +43,6 @@ local UserInputService = game:GetService("UserInputService")
 
 local Player = Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local Root = Character:WaitForChild("HumanoidRootPart")
 
 -- Anti-AFK
 local VirtualUser = game:GetService("VirtualUser")
@@ -30,543 +51,299 @@ Player.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Config
-_G.Config = {
-    AutoFish = false,
-    AutoSell = false,
-    WalkSpeed = 16,
-    JumpPower = 50,
-    Noclip = false,
-    ESP = false,
-    Stats = {
-        Caught = 0,
-        Sold = 0
-    }
-}
-
--- Notification function
-local function Notify(msg)
-    game.StarterGui:SetCore("SendNotification", {
-        Title = "Fish Hub",
-        Text = msg,
-        Duration = 2
-    })
+-- Load Config
+local Config = LoadModule("Config/Settings.lua")
+if not Config then
+    error("[Fish It!] Failed to load config!")
+    return
 end
 
-Notify("Loading...")
+-- Load Utilities
+local Utils = LoadModule("Modules/Utilities.lua")
+if not Utils then
+    error("[Fish It!] Failed to load utilities!")
+    return
+end
 
--- ══════════════════════════════════════════════════════════
--- CORE FISHING FUNCTIONS
--- ══════════════════════════════════════════════════════════
+-- Load Modules
+local AutoFish = LoadModule("Modules/AutoFish.lua")
+local Merchant = LoadModule("Modules/Merchant.lua")
+local Teleport = LoadModule("Modules/Teleport.lua")
+local ESP = LoadModule("Modules/ESP.lua")
 
-local Fishing = {}
+-- Load UI
+local UILib = LoadModule("UI/Library.lua")
+if not UILib then
+    error("[Fish It!] Failed to load UI!")
+    return
+end
 
--- Get any rod in possession
-function Fishing.GetRod()
-    -- Check equipped first
-    for _, item in pairs(Character:GetChildren()) do
-        if item:IsA("Tool") then
-            return item
+-- Initialize modules
+if AutoFish then AutoFish.Init(Config, Utils) end
+if Merchant then Merchant.Init(Config, Utils) end
+if Teleport then Teleport.Init(Config, Utils) end
+if ESP then ESP.Init(Config, Utils) end
+
+-- Create UI
+local Window = UILib:CreateWindow({
+    Title = "🐟 Fish It! Hub",
+    Size = UDim2.new(0, 450, 0, 520)
+})
+
+-- Auto Farm Tab
+local AutoTab = Window:CreateTab("⚡ Auto Farm")
+
+AutoTab:CreateToggle("Auto Fish", false, function(value)
+    Config.AutoFish = value
+    if AutoFish then
+        if value then
+            AutoFish.Start()
+        else
+            AutoFish.Stop()
         end
     end
-    
-    -- Check backpack
-    for _, item in pairs(Player.Backpack:GetChildren()) do
-        if item:IsA("Tool") then
-            return item
-        end
-    end
-    
-    return nil
-end
+end)
 
--- Equip the rod
-function Fishing.EquipRod()
-    local rod = Fishing.GetRod()
-    
-    if not rod then 
-        return false 
-    end
-    
-    if rod.Parent == Player.Backpack then
-        Humanoid:EquipTool(rod)
-        task.wait(0.5)
-    end
-    
-    return rod.Parent == Character
-end
+AutoTab:CreateToggle("Instant Catch", false, function(value)
+    Config.InstantCatch = value
+end)
 
--- Cast the fishing line
-function Fishing.Cast()
-    local rod = Fishing.GetRod()
-    
-    if not rod or rod.Parent ~= Character then
-        return false
-    end
-    
-    -- Activate tool
-    rod:Activate()
-    
-    -- Simulate mouse hold
-    mouse1press()
-    task.wait(1)
-    mouse1release()
-    
-    return true
-end
+AutoTab:CreateToggle("Auto Equip Best Rod", false, function(value)
+    Config.AutoEquipBestRod = value
+end)
 
--- Check if fish is biting
-function Fishing.IsBiting()
-    -- Check GUI for bite indicators
-    for _, gui in pairs(Player.PlayerGui:GetDescendants()) do
-        if gui:IsA("TextLabel") and gui.Visible then
-            local text = gui.Text:lower()
-            if text:match("!") or text:match("catch") or text:match("click") then
-                return true
-            end
-        end
+AutoTab:CreateButton("Cast Rod Now", function()
+    if AutoFish then
+        AutoFish.Cast()
     end
-    return false
-end
+end)
 
--- Reel in the fish
-function Fishing.Reel()
-    local rod = Fishing.GetRod()
-    if not rod then return end
-    
-    for i = 1, 5 do
-        rod:Activate()
-        mouse1click()
-        task.wait(0.1)
+-- Merchant Tab
+local MerchantTab = Window:CreateTab("💰 Merchant")
+
+MerchantTab:CreateToggle("Auto Sell", false, function(value)
+    Config.AutoSell = value
+    if Merchant and value then
+        Merchant.StartAutoSell()
     end
-end
+end)
 
--- Main fishing loop
-function Fishing.Start()
-    while _G.Config.AutoFish do
-        task.wait(0.5)
-        
-        -- Step 1: Equip rod
-        if not Fishing.EquipRod() then
-            Notify("No rod found!")
-            task.wait(2)
-        end
-        
-        -- Step 2: Cast
-        if Fishing.Cast() then
-            Notify("Casted!")
-            task.wait(2)
-            
-            -- Step 3: Wait for bite
-            local timer = 0
-            local maxWait = 20
-            local gotBite = false
-            
-            while timer < maxWait and _G.Config.AutoFish do
-                if Fishing.IsBiting() then
-                    gotBite = true
-                    break
-                end
-                task.wait(0.2)
-                timer = timer + 0.2
-            end
-            
-            -- Step 4: Reel if bite detected
-            if gotBite then
-                Notify("Reeling!")
-                task.wait(0.3)
-                Fishing.Reel()
-                
-                _G.Config.Stats.Caught = _G.Config.Stats.Caught + 1
-                task.wait(2)
-                
-                -- Auto sell check
-                if _G.Config.AutoSell and _G.Config.Stats.Caught % 10 == 0 then
-                    Fishing.Sell()
-                end
-            end
-        end
+MerchantTab:CreateToggle("Sell Common", true, function(value)
+    Config.SellCommon = value
+end)
+
+MerchantTab:CreateToggle("Sell Rare", false, function(value)
+    Config.SellRare = value
+end)
+
+MerchantTab:CreateToggle("Sell Legendary", false, function(value)
+    Config.SellLegendary = value
+end)
+
+MerchantTab:CreateButton("TP to Merchant", function()
+    if Merchant then
+        Merchant.TeleportToMerchant()
     end
-end
+end)
 
--- Sell fish function
-function Fishing.Sell()
-    if not Root then return end
+MerchantTab:CreateButton("Sell All Now", function()
+    if Merchant then
+        Merchant.SellAll()
+    end
+end)
+
+-- Teleport Tab
+local TPTab = Window:CreateTab("🌍 Teleport")
+
+TPTab:CreateButton("Spawn", function()
+    if Teleport then Teleport.ToSpawn() end
+end)
+
+TPTab:CreateButton("Fishing Spot 1", function()
+    if Teleport then Teleport.ToFishingSpot(1) end
+end)
+
+TPTab:CreateButton("Fishing Spot 2", function()
+    if Teleport then Teleport.ToFishingSpot(2) end
+end)
+
+TPTab:CreateButton("Deep Ocean", function()
+    if Teleport then Teleport.ToDeepOcean() end
+end)
+
+-- ESP Tab
+local ESPTab = Window:CreateTab("👁️ ESP")
+
+ESPTab:CreateToggle("Fish ESP", false, function(value)
+    Config.FishESP = value
+    if ESP then
+        ESP.ToggleFishESP(value)
+    end
+end)
+
+ESPTab:CreateToggle("Merchant ESP", false, function(value)
+    Config.MerchantESP = value
+    if ESP then
+        ESP.ToggleMerchantESP(value)
+    end
+end)
+
+ESPTab:CreateToggle("NPC ESP", false, function(value)
+    Config.NPCESP = value
+    if ESP then
+        ESP.ToggleNPCESP(value)
+    end
+end)
+
+-- Player Tab
+local PlayerTab = Window:CreateTab("👤 Player")
+
+PlayerTab:CreateSlider("WalkSpeed", 16, 300, 16, function(value)
+    Config.WalkSpeed = value
+    local char = Player.Character
+    if char then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then hum.WalkSpeed = value end
+    end
+end)
+
+PlayerTab:CreateSlider("JumpPower", 50, 300, 50, function(value)
+    Config.JumpPower = value
+    local char = Player.Character
+    if char then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then hum.JumpPower = value end
+    end
+end)
+
+PlayerTab:CreateToggle("Noclip", false, function(value)
+    Config.Noclip = value
+end)
+
+PlayerTab:CreateToggle("Infinite Jump", false, function(value)
+    Config.InfJump = value
+end)
+
+PlayerTab:CreateToggle("Fly (WASD)", false, function(value)
+    Config.Fly = value
+end)
+
+PlayerTab:CreateSlider("Fly Speed", 10, 200, 50, function(value)
+    Config.FlySpeed = value
+end)
+
+-- Settings Tab
+local SettingsTab = Window:CreateTab("⚙️ Settings")
+
+SettingsTab:CreateButton("Rejoin Server", function()
+    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, Player)
+end)
+
+SettingsTab:CreateButton("Server Hop", function()
+    local success, servers = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(
+            game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+        )
+    end)
     
-    local oldPos = Root.CFrame
-    
-    -- Find sell location
-    local sellLocation = nil
-    for _, obj in pairs(workspace:GetDescendants()) do
-        local name = obj.Name:lower()
-        if name:match("sell") or name:match("shop") or name:match("merchant") then
-            if obj:IsA("Model") or obj:IsA("Part") then
-                sellLocation = obj
+    if success and servers then
+        for _, server in pairs(servers.data) do
+            if server.id ~= game.JobId then
+                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, server.id, Player)
                 break
             end
         end
     end
-    
-    if sellLocation then
-        Notify("Selling...")
-        
-        -- Teleport to sell
-        local pos = sellLocation:IsA("Model") and sellLocation:GetPivot() or sellLocation.CFrame
-        Root.CFrame = pos * CFrame.new(0, 0, 5)
-        task.wait(1)
-        
-        -- Trigger sell
-        for _, v in pairs(sellLocation:GetDescendants()) do
-            if v:IsA("ProximityPrompt") then
-                fireproximityprompt(v)
-            end
-        end
-        
-        task.wait(1)
-        Root.CFrame = oldPos
-        
-        _G.Config.Stats.Sold = _G.Config.Stats.Sold + 1
-        Notify("Sold!")
-    end
-end
+end)
 
--- ══════════════════════════════════════════════════════════
--- PLAYER MODIFICATIONS
--- ══════════════════════════════════════════════════════════
+SettingsTab:CreateButton("Destroy GUI", function()
+    _G.FishItHubLoaded = false
+    Config.AutoFish = false
+    Config.Fly = false
+    Window:Destroy()
+end)
 
--- Noclip
-RunService.Stepped:Connect(function()
-    if _G.Config.Noclip and Character then
-        for _, part in pairs(Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
+-- Apply player mods
+RunService.Heartbeat:Connect(function()
+    if Config.Noclip then
+        local char = Player.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
             end
         end
     end
 end)
 
--- Speed/Jump updates
-local function UpdateSpeed()
-    if Humanoid then
-        Humanoid.WalkSpeed = _G.Config.WalkSpeed
-    end
-end
-
-local function UpdateJump()
-    if Humanoid then
-        Humanoid.JumpPower = _G.Config.JumpPower
-    end
-end
-
--- Character respawn handler
-Player.CharacterAdded:Connect(function(newChar)
-    Character = newChar
-    Humanoid = newChar:WaitForChild("Humanoid")
-    Root = newChar:WaitForChild("HumanoidRootPart")
-    task.wait(1)
-    UpdateSpeed()
-    UpdateJump()
-end)
-
--- ══════════════════════════════════════════════════════════
--- UI CREATION
--- ══════════════════════════════════════════════════════════
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FishHub"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = Player.PlayerGui
-
-local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 350, 0, 400)
-Main.Position = UDim2.new(0.5, -175, 0.5, -200)
-Main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-Main.BorderSizePixel = 0
-Main.Active = true
-Main.Parent = ScreenGui
-
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
-
--- Draggable
-local dragging, dragInput, dragStart, startPos
-Main.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = Main.Position
-    end
-end)
-
-Main.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        Main.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
-
--- Top bar
-local Top = Instance.new("Frame")
-Top.Size = UDim2.new(1, 0, 0, 35)
-Top.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-Top.BorderSizePixel = 0
-Top.Parent = Main
-
-Instance.new("UICorner", Top).CornerRadius = UDim.new(0, 8)
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -40, 1, 0)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "🐟 FISH HUB"
-Title.TextColor3 = Color3.fromRGB(100, 180, 255)
-Title.TextSize = 15
-Title.Font = Enum.Font.GothamBold
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = Top
-
-local Close = Instance.new("TextButton")
-Close.Size = UDim2.new(0, 30, 0, 30)
-Close.Position = UDim2.new(1, -32, 0, 2)
-Close.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-Close.Text = "X"
-Close.TextColor3 = Color3.fromRGB(255, 255, 255)
-Close.TextSize = 14
-Close.Font = Enum.Font.GothamBold
-Close.Parent = Top
-
-Instance.new("UICorner", Close).CornerRadius = UDim.new(0, 5)
-
-Close.MouseButton1Click:Connect(function()
-    _G.Config.AutoFish = false
-    ScreenGui:Destroy()
-    _G.FishItLoaded = false
-end)
-
--- Content
-local Content = Instance.new("ScrollingFrame")
-Content.Size = UDim2.new(1, -10, 1, -42)
-Content.Position = UDim2.new(0, 5, 0, 38)
-Content.BackgroundTransparency = 1
-Content.BorderSizePixel = 0
-Content.ScrollBarThickness = 4
-Content.Parent = Main
-
-local List = Instance.new("UIListLayout")
-List.Padding = UDim.new(0, 5)
-List.Parent = Content
-
-List:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    Content.CanvasSize = UDim2.new(0, 0, 0, List.AbsoluteContentSize.Y + 5)
-end)
-
--- UI Elements
-local function CreateToggle(name, callback)
-    local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(1, 0, 0, 35)
-    Frame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    Frame.Parent = Content
-    
-    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 5)
-    
-    local Label = Instance.new("TextLabel")
-    Label.Size = UDim2.new(0.65, 0, 1, 0)
-    Label.Position = UDim2.new(0, 10, 0, 0)
-    Label.BackgroundTransparency = 1
-    Label.Text = name
-    Label.TextColor3 = Color3.fromRGB(230, 230, 230)
-    Label.TextSize = 12
-    Label.Font = Enum.Font.Gotham
-    Label.TextXAlignment = Enum.TextXAlignment.Left
-    Label.Parent = Frame
-    
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(0, 45, 0, 25)
-    Button.Position = UDim2.new(1, -50, 0.5, -12)
-    Button.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
-    Button.Text = "OFF"
-    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Button.TextSize = 11
-    Button.Font = Enum.Font.GothamBold
-    Button.Parent = Frame
-    
-    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 4)
-    
-    local active = false
-    Button.MouseButton1Click:Connect(function()
-        active = not active
-        Button.BackgroundColor3 = active and Color3.fromRGB(50, 200, 100) or Color3.fromRGB(80, 80, 90)
-        Button.Text = active and "ON" or "OFF"
-        callback(active)
-    end)
-end
-
-local function CreateSlider(name, min, max, default, callback)
-    local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(1, 0, 0, 50)
-    Frame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    Frame.Parent = Content
-    
-    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 5)
-    
-    local Label = Instance.new("TextLabel")
-    Label.Size = UDim2.new(1, -20, 0, 18)
-    Label.Position = UDim2.new(0, 10, 0, 5)
-    Label.BackgroundTransparency = 1
-    Label.Text = name .. ": " .. default
-    Label.TextColor3 = Color3.fromRGB(200, 200, 200)
-    Label.TextSize = 11
-    Label.Font = Enum.Font.Gotham
-    Label.TextXAlignment = Enum.TextXAlignment.Left
-    Label.Parent = Frame
-    
-    local SliderBG = Instance.new("Frame")
-    SliderBG.Size = UDim2.new(1, -20, 0, 5)
-    SliderBG.Position = UDim2.new(0, 10, 0, 30)
-    SliderBG.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    SliderBG.BorderSizePixel = 0
-    SliderBG.Parent = Frame
-    
-    Instance.new("UICorner", SliderBG).CornerRadius = UDim.new(1, 0)
-    
-    local Fill = Instance.new("Frame")
-    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    Fill.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-    Fill.BorderSizePixel = 0
-    Fill.Parent = SliderBG
-    
-    Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
-    
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1, 0, 2, 0)
-    Button.BackgroundTransparency = 1
-    Button.Text = ""
-    Button.Parent = SliderBG
-    
-    local dragging = false
-    
-    local function Update(input)
-        local pos = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
-        local value = math.floor(min + (max - min) * pos)
-        Fill.Size = UDim2.new(pos, 0, 1, 0)
-        Label.Text = name .. ": " .. value
-        callback(value)
-    end
-    
-    Button.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            Update(input)
+-- Infinite Jump
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfJump then
+        local char = Player.Character
+        if char then
+            local hum = char:FindFirstChild("Humanoid")
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
         end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            Update(input)
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-end
-
-local function CreateButton(name, callback)
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1, 0, 0, 32)
-    Button.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
-    Button.Text = name
-    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Button.TextSize = 12
-    Button.Font = Enum.Font.GothamBold
-    Button.Parent = Content
-    
-    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 5)
-    
-    Button.MouseButton1Click:Connect(callback)
-end
-
--- Build UI
-CreateToggle("Auto Fish", function(v)
-    _G.Config.AutoFish = v
-    if v then
-        Notify("Auto Fish Started")
-        task.spawn(Fishing.Start)
-    else
-        Notify("Auto Fish Stopped")
     end
 end)
 
-CreateToggle("Auto Sell", function(v)
-    _G.Config.AutoSell = v
-end)
-
-CreateSlider("Speed", 16, 150, 16, function(v)
-    _G.Config.WalkSpeed = v
-    UpdateSpeed()
-end)
-
-CreateSlider("Jump", 50, 300, 50, function(v)
-    _G.Config.JumpPower = v
-    UpdateJump()
-end)
-
-CreateToggle("Noclip", function(v)
-    _G.Config.Noclip = v
-end)
-
-CreateButton("Sell Now", function()
-    Fishing.Sell()
-end)
-
--- Stats display
-local StatsLabel = Instance.new("TextLabel")
-StatsLabel.Size = UDim2.new(1, 0, 0, 50)
-StatsLabel.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-StatsLabel.Text = "Stats Loading..."
-StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-StatsLabel.TextSize = 10
-StatsLabel.Font = Enum.Font.Gotham
-StatsLabel.TextYAlignment = Enum.TextYAlignment.Top
-StatsLabel.Parent = Content
-
-Instance.new("UICorner", StatsLabel).CornerRadius = UDim.new(0, 5)
-
-local Padding = Instance.new("UIPadding", StatsLabel)
-Padding.PaddingLeft = UDim.new(0, 10)
-Padding.PaddingTop = UDim.new(0, 8)
-
--- Update stats
-task.spawn(function()
-    while task.wait(1) do
-        if StatsLabel then
-            StatsLabel.Text = string.format(
-                "Fish Caught: %d\nFish Sold: %d\nStatus: %s",
-                _G.Config.Stats.Caught,
-                _G.Config.Stats.Sold,
-                _G.Config.AutoFish and "Fishing..." or "Idle"
-            )
+-- Fly System
+local FlyBody = nil
+spawn(function()
+    while task.wait() do
+        if Config.Fly then
+            local char = Player.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp and not FlyBody then
+                    FlyBody = Instance.new("BodyVelocity")
+                    FlyBody.Parent = hrp
+                    FlyBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    FlyBody.Velocity = Vector3.new(0, 0, 0)
+                end
+                
+                if FlyBody then
+                    local cam = workspace.CurrentCamera
+                    local speed = Config.FlySpeed
+                    local vel = Vector3.new(0, 0, 0)
+                    
+                    if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                        vel = vel + (cam.CFrame.LookVector * speed)
+                    end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                        vel = vel - (cam.CFrame.LookVector * speed)
+                    end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                        vel = vel - (cam.CFrame.RightVector * speed)
+                    end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                        vel = vel + (cam.CFrame.RightVector * speed)
+                    end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                        vel = vel + Vector3.new(0, speed, 0)
+                    end
+                    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                        vel = vel - Vector3.new(0, speed, 0)
+                    end
+                    
+                    FlyBody.Velocity = vel
+                end
+            end
+        else
+            if FlyBody then
+                FlyBody:Destroy()
+                FlyBody = nil
+            end
         end
     end
 end)
 
 -- Done
-Notify("Script Loaded!")
-print("Fish Hub loaded successfully")
-print("All systems operational")
+if Utils then
+    Utils.Notify("Fish It!", "Loaded Successfully!")
+end
+print("[Fish It!] All modules loaded!")
+print("[Fish It!] Script ready!")
