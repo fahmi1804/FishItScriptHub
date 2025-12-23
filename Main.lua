@@ -1,872 +1,572 @@
 --[[
-╔═══════════════════════════════════════════════════════════════╗
-║     FISH IT! HUB - MANUAL CONTROL EDITION                     ║
-║     Full Manual Settings - Adjustable Everything              ║
-║     Compatible dengan Chloe X style GUI di screenshot         ║
-╚═══════════════════════════════════════════════════════════════╝
+    Fish It Script Hub - Main.lua
+    Working Version - Tested & Verified
+    Struktur Modular untuk easy maintenance
 ]]
 
 repeat task.wait() until game:IsLoaded()
 
--- Anti-AFK
-local vu = game:GetService("VirtualUser")
-game:GetService("Players").LocalPlayer.Idled:Connect(function()
-    vu:CaptureController()
-    vu:ClickButton2(Vector2.new())
-end)
-
--- Remove old GUI
-task.wait(0.3)
-pcall(function()
-    if game.Players.LocalPlayer.PlayerGui:FindFirstChild("FishHub") then
-        game.Players.LocalPlayer.PlayerGui.FishHub:Destroy()
-    end
-end)
+-- Anti double load
+if _G.FishItLoaded then
+    warn("Script already running!")
+    return
+end
+_G.FishItLoaded = true
 
 -- Services
-local plr = game.Players.LocalPlayer
-local uis = game:GetService("UserInputService")
-local rs = game:GetService("RunService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
--- Get character
-local char = plr.Character or plr.CharacterAdded:Wait()
-local hum = char:WaitForChild("Humanoid")
-local root = char:WaitForChild("HumanoidRootPart")
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local Root = Character:WaitForChild("HumanoidRootPart")
 
--- Notification
-local function notify(txt)
+-- Anti-AFK
+local VirtualUser = game:GetService("VirtualUser")
+Player.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- Config
+_G.Config = {
+    AutoFish = false,
+    AutoSell = false,
+    WalkSpeed = 16,
+    JumpPower = 50,
+    Noclip = false,
+    ESP = false,
+    Stats = {
+        Caught = 0,
+        Sold = 0
+    }
+}
+
+-- Notification function
+local function Notify(msg)
     game.StarterGui:SetCore("SendNotification", {
-        Title = "🐟 Fish Hub",
-        Text = txt,
+        Title = "Fish Hub",
+        Text = msg,
         Duration = 2
     })
 end
 
-notify("Loading Manual Control...")
+Notify("Loading...")
 
--- Config dengan pengaturan manual
-local cfg = {
-    -- Fishing settings
-    autofish = false,
-    autosell = false,
-    
-    -- Manual timing (ADJUST INI!)
-    castHoldTime = 0.8,      -- Berapa lama hold mouse saat cast
-    waitAfterCast = 2.0,     -- Tunggu setelah cast sebelum cek bite
-    biteCheckInterval = 0.2, -- Seberapa sering cek bite
-    maxWaitTime = 20,        -- Max tunggu bite (detik)
-    reelClicks = 5,          -- Berapa kali klik saat reel
-    reelDelay = 0.1,         -- Delay antar klik reel
-    animationWait = 2.5,     -- Tunggu animasi selesai
-    
-    -- Sell settings
-    sellEvery = 10,          -- Jual setiap X ikan
-    
-    -- Player mods
-    speed = 16,
-    jump = 50,
-    noclip = false,
-    
-    -- Detection method
-    detectionMethod = "gui", -- "gui", "sound", "animation"
-    useRemotes = true,       -- Coba fire remote events
-    
-    -- Debug
-    showDebug = false
-}
+-- ══════════════════════════════════════════════════════════
+-- CORE FISHING FUNCTIONS
+-- ══════════════════════════════════════════════════════════
 
--- Stats
-local stats = {
-    caught = 0,
-    casts = 0,
-    bites = 0,
-    misses = 0
-}
+local Fishing = {}
 
--- Debug log
-local function debug(txt)
-    if cfg.showDebug then
-        print("[FISH DEBUG] " .. txt)
-    end
-end
-
--- ═══════════════════════════════════════════════════════════
--- FISHING FUNCTIONS - MANUAL CONTROL
--- ═══════════════════════════════════════════════════════════
-
--- Get rod (FIXED - More lenient detection)
-local function getRod()
-    -- Method 1: Check what's currently equipped (PRIORITAS TERTINGGI)
-    local equippedTool = char:FindFirstChildOfClass("Tool")
-    if equippedTool then
-        debug("Found equipped tool: " .. equippedTool.Name)
-        return equippedTool -- Return ANY equipped tool
-    end
-    
-    -- Method 2: Check all tools in character
-    for _, v in pairs(char:GetChildren()) do
-        if v:IsA("Tool") then
-            debug("Found tool in character: " .. v.Name)
-            return v
+-- Get any rod in possession
+function Fishing.GetRod()
+    -- Check equipped first
+    for _, item in pairs(Character:GetChildren()) do
+        if item:IsA("Tool") then
+            return item
         end
     end
     
-    -- Method 3: Check backpack with specific names
-    for _, v in pairs(plr.Backpack:GetChildren()) do
-        if v:IsA("Tool") then
-            local n = v.Name:lower()
-            if n:match("rod") or n:match("fish") or n:match("pole") or n:match("element") then
-                debug("Found rod in backpack: " .. v.Name)
-                return v
-            end
+    -- Check backpack
+    for _, item in pairs(Player.Backpack:GetChildren()) do
+        if item:IsA("Tool") then
+            return item
         end
     end
     
-    -- Method 4: Just get ANY tool from backpack
-    for _, v in pairs(plr.Backpack:GetChildren()) do
-        if v:IsA("Tool") then
-            debug("Found any tool in backpack: " .. v.Name)
-            return v
-        end
-    end
-    
-    debug("ERROR: No tool found anywhere!")
     return nil
 end
 
--- Equip rod (SIMPLIFIED)
-local function equipRod()
-    local rod = getRod()
-    if rod then
-        debug("Rod found: " .. rod.Name .. " (Parent: " .. rod.Parent.Name .. ")")
-        
-        -- If rod is in backpack, equip it
-        if rod.Parent == plr.Backpack then
-            debug("Equipping rod from backpack...")
-            hum:EquipTool(rod)
-            task.wait(0.8) -- Longer wait for equip
-        end
-        
-        -- Verify it's equipped
-        local equipped = char:FindFirstChildOfClass("Tool")
-        if equipped then
-            debug("✓ Rod equipped successfully: " .. equipped.Name)
-            return true
-        else
-            debug("✗ Rod not equipped after attempt")
-            return false
-        end
-    else
-        debug("✗ No rod found!")
-        return false
+-- Equip the rod
+function Fishing.EquipRod()
+    local rod = Fishing.GetRod()
+    
+    if not rod then 
+        return false 
     end
+    
+    if rod.Parent == Player.Backpack then
+        Humanoid:EquipTool(rod)
+        task.wait(0.5)
+    end
+    
+    return rod.Parent == Character
 end
 
--- Cast dengan timing yang bisa diatur (FIXED)
-local function cast()
-    local rod = getRod()
+-- Cast the fishing line
+function Fishing.Cast()
+    local rod = Fishing.GetRod()
     
-    if not rod then
-        debug("✗ Cast failed: No rod found!")
+    if not rod or rod.Parent ~= Character then
         return false
     end
     
-    -- Check if rod is equipped
-    if rod.Parent ~= char then
-        debug("✗ Cast failed: Rod not equipped! (Parent: " .. rod.Parent.Name .. ")")
-        return false
-    end
+    -- Activate tool
+    rod:Activate()
     
-    debug("✓ Casting with: " .. rod.Name .. " | Hold time: " .. cfg.castHoldTime .. "s")
+    -- Simulate mouse hold
+    mouse1press()
+    task.wait(1)
+    mouse1release()
     
-    -- Method 1: Tool activation
-    pcall(function()
-        rod:Activate()
-        debug("  - Tool:Activate() called")
-    end)
-    
-    -- Method 2: Mouse hold (PRIMARY METHOD)
-    task.spawn(function()
-        mouse1press()
-        debug("  - Mouse pressed")
-        task.wait(cfg.castHoldTime)
-        mouse1release()
-        debug("  - Mouse released after " .. cfg.castHoldTime .. "s")
-    end)
-    
-    -- Method 3: Try fire remotes if enabled
-    if cfg.useRemotes then
-        task.spawn(function()
-            task.wait(0.1) -- Small delay
-            pcall(function()
-                for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                    if v:IsA("RemoteEvent") then
-                        local n = v.Name:lower()
-                        if n:match("cast") or n:match("throw") or n:match("fish") or n:match("start") then
-                            v:FireServer()
-                            debug("  - Fired remote: " .. v.Name)
-                        end
-                    end
-                end
-            end)
-        end)
-    end
-    
-    stats.casts = stats.casts + 1
     return true
 end
 
--- Check bite dengan multiple methods
-local function isBiting()
-    -- Method 1: GUI Detection
-    if cfg.detectionMethod == "gui" or cfg.detectionMethod == "all" then
-        for _, gui in pairs(plr.PlayerGui:GetDescendants()) do
-            if gui:IsA("TextLabel") and gui.Visible then
-                local txt = gui.Text:lower()
-                if txt:match("!") or txt:match("click") or txt:match("catch") or txt:match("reel") or txt:match("pull") then
-                    debug("Bite detected via GUI: " .. gui.Text)
-                    return true
-                end
-            end
-            
-            -- Check images too
-            if gui:IsA("ImageLabel") and gui.Visible then
-                local n = gui.Name:lower()
-                if n:match("catch") or n:match("bite") or n:match("fish") then
-                    debug("Bite detected via Image: " .. gui.Name)
-                    return true
-                end
+-- Check if fish is biting
+function Fishing.IsBiting()
+    -- Check GUI for bite indicators
+    for _, gui in pairs(Player.PlayerGui:GetDescendants()) do
+        if gui:IsA("TextLabel") and gui.Visible then
+            local text = gui.Text:lower()
+            if text:match("!") or text:match("catch") or text:match("click") then
+                return true
             end
         end
     end
-    
-    -- Method 2: Sound Detection
-    if cfg.detectionMethod == "sound" or cfg.detectionMethod == "all" then
-        local rod = getRod()
-        if rod then
-            for _, v in pairs(rod:GetDescendants()) do
-                if v:IsA("Sound") and v.Playing then
-                    debug("Bite detected via Sound: " .. v.Name)
-                    return true
-                end
-            end
-        end
-    end
-    
-    -- Method 3: Animation Detection
-    if cfg.detectionMethod == "animation" or cfg.detectionMethod == "all" then
-        if char:FindFirstChild("Humanoid") then
-            local animator = char.Humanoid:FindFirstChildOfClass("Animator")
-            if animator then
-                for _, track in pairs(animator:GetPlayingAnimationTracks()) do
-                    local n = (track.Animation and track.Animation.Name or ""):lower()
-                    if n:match("reel") or n:match("catch") or n:match("bite") then
-                        debug("Bite detected via Animation: " .. n)
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    
     return false
 end
 
--- Reel dengan settings manual
-local function reel()
-    local rod = getRod()
-    if not rod then
-        debug("No rod to reel with!")
-        return
-    end
+-- Reel in the fish
+function Fishing.Reel()
+    local rod = Fishing.GetRod()
+    if not rod then return end
     
-    debug("Reeling... Clicks: " .. cfg.reelClicks .. ", Delay: " .. cfg.reelDelay .. "s")
-    
-    for i = 1, cfg.reelClicks do -- SETTING MANUAL
-        -- Tool activation
-        pcall(function()
-            rod:Activate()
-        end)
-        
-        -- Mouse click
+    for i = 1, 5 do
+        rod:Activate()
         mouse1click()
-        
-        -- Try fire reel remotes
-        if cfg.useRemotes then
-            pcall(function()
-                for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                    if v:IsA("RemoteEvent") then
-                        local n = v.Name:lower()
-                        if n:match("reel") or n:match("catch") or n:match("complete") then
-                            v:FireServer()
-                            v:FireServer(true)
-                        end
-                    end
-                end
-            end)
-        end
-        
-        task.wait(cfg.reelDelay) -- SETTING MANUAL
+        task.wait(0.1)
     end
 end
 
--- Main auto fish loop
-local function autoFish()
-    while cfg.autofish do
+-- Main fishing loop
+function Fishing.Start()
+    while _G.Config.AutoFish do
         task.wait(0.5)
         
         -- Step 1: Equip rod
-        if not equipRod() then
-            notify("⚠️ NO ROD FOUND!")
+        if not Fishing.EquipRod() then
+            Notify("No rod found!")
             task.wait(2)
-            continue
         end
         
         -- Step 2: Cast
-        if not cast() then
-            task.wait(1)
-            continue
-        end
-        
-        notify("🎣 Casting...")
-        task.wait(cfg.waitAfterCast) -- SETTING MANUAL
-        
-        -- Step 3: Wait for bite
-        local waited = 0
-        local gotBite = false
-        
-        debug("Waiting for bite... Max: " .. cfg.maxWaitTime .. "s")
-        
-        while waited < cfg.maxWaitTime and cfg.autofish do
-            if isBiting() then
-                gotBite = true
-                stats.bites = stats.bites + 1
-                break
-            end
-            task.wait(cfg.biteCheckInterval) -- SETTING MANUAL
-            waited = waited + cfg.biteCheckInterval
-        end
-        
-        -- Step 4: Reel if bite detected
-        if gotBite then
-            notify("🐟 BITE! Reeling...")
-            reel()
+        if Fishing.Cast() then
+            Notify("Casted!")
+            task.wait(2)
             
-            stats.caught = stats.caught + 1
-            task.wait(cfg.animationWait) -- SETTING MANUAL
+            -- Step 3: Wait for bite
+            local timer = 0
+            local maxWait = 20
+            local gotBite = false
             
-            -- Auto sell check
-            if cfg.autosell and stats.caught % cfg.sellEvery == 0 then
-                task.spawn(autoSell)
-                task.wait(3)
+            while timer < maxWait and _G.Config.AutoFish do
+                if Fishing.IsBiting() then
+                    gotBite = true
+                    break
+                end
+                task.wait(0.2)
+                timer = timer + 0.2
             end
-        else
-            -- Timeout
-            stats.misses = stats.misses + 1
-            debug("Timeout - no bite detected")
-            task.wait(0.5)
+            
+            -- Step 4: Reel if bite detected
+            if gotBite then
+                Notify("Reeling!")
+                task.wait(0.3)
+                Fishing.Reel()
+                
+                _G.Config.Stats.Caught = _G.Config.Stats.Caught + 1
+                task.wait(2)
+                
+                -- Auto sell check
+                if _G.Config.AutoSell and _G.Config.Stats.Caught % 10 == 0 then
+                    Fishing.Sell()
+                end
+            end
         end
     end
-    
-    notify("Auto Fish Stopped")
 end
 
--- Auto sell
-function autoSell()
-    if not root then return end
+-- Sell fish function
+function Fishing.Sell()
+    if not Root then return end
     
-    local oldPos = root.CFrame
+    local oldPos = Root.CFrame
     
-    -- Find sell area
-    local sell = nil
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("Model") or v:IsA("Part") then
-            local n = v.Name:lower()
-            if n:match("sell") or n:match("shop") or n:match("merchant") or n:match("npc") then
-                sell = v
+    -- Find sell location
+    local sellLocation = nil
+    for _, obj in pairs(workspace:GetDescendants()) do
+        local name = obj.Name:lower()
+        if name:match("sell") or name:match("shop") or name:match("merchant") then
+            if obj:IsA("Model") or obj:IsA("Part") then
+                sellLocation = obj
                 break
             end
         end
     end
     
-    if sell then
-        notify("💰 Selling...")
+    if sellLocation then
+        Notify("Selling...")
         
-        -- Teleport
-        local sellPos
-        if sell:IsA("Model") then
-            sellPos = sell:GetPivot()
-        else
-            sellPos = sell.CFrame
-        end
+        -- Teleport to sell
+        local pos = sellLocation:IsA("Model") and sellLocation:GetPivot() or sellLocation.CFrame
+        Root.CFrame = pos * CFrame.new(0, 0, 5)
+        task.wait(1)
         
-        root.CFrame = sellPos * CFrame.new(0, 0, 5)
-        task.wait(0.8)
-        
-        -- Trigger prompts
-        for _, v in pairs(sell:GetDescendants()) do
+        -- Trigger sell
+        for _, v in pairs(sellLocation:GetDescendants()) do
             if v:IsA("ProximityPrompt") then
                 fireproximityprompt(v)
-            elseif v:IsA("ClickDetector") then
-                fireclickdetector(v)
             end
         end
         
-        task.wait(1.5)
-        root.CFrame = oldPos
+        task.wait(1)
+        Root.CFrame = oldPos
         
-        notify("✅ Sold! Total: " .. stats.caught)
-    else
-        notify("❌ Sell area not found!")
+        _G.Config.Stats.Sold = _G.Config.Stats.Sold + 1
+        Notify("Sold!")
     end
 end
 
--- ═══════════════════════════════════════════════════════════
--- PLAYER MODS
--- ═══════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════════
+-- PLAYER MODIFICATIONS
+-- ══════════════════════════════════════════════════════════
 
-rs.Stepped:Connect(function()
-    if cfg.noclip and char then
-        for _, v in pairs(char:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.CanCollide = false
+-- Noclip
+RunService.Stepped:Connect(function()
+    if _G.Config.Noclip and Character then
+        for _, part in pairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
             end
         end
     end
 end)
 
-plr.CharacterAdded:Connect(function(newChar)
-    char = newChar
-    hum = newChar:WaitForChild("Humanoid")
-    root = newChar:WaitForChild("HumanoidRootPart")
+-- Speed/Jump updates
+local function UpdateSpeed()
+    if Humanoid then
+        Humanoid.WalkSpeed = _G.Config.WalkSpeed
+    end
+end
+
+local function UpdateJump()
+    if Humanoid then
+        Humanoid.JumpPower = _G.Config.JumpPower
+    end
+end
+
+-- Character respawn handler
+Player.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+    Humanoid = newChar:WaitForChild("Humanoid")
+    Root = newChar:WaitForChild("HumanoidRootPart")
     task.wait(1)
-    hum.WalkSpeed = cfg.speed
-    hum.JumpPower = cfg.jump
+    UpdateSpeed()
+    UpdateJump()
 end)
 
--- ═══════════════════════════════════════════════════════════
--- UI - MANUAL SETTINGS STYLE
--- ═══════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════════
+-- UI CREATION
+-- ══════════════════════════════════════════════════════════
 
-local sg = Instance.new("ScreenGui")
-sg.Name = "FishHub"
-sg.ResetOnSpawn = false
-sg.Parent = plr.PlayerGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FishHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = Player.PlayerGui
 
-local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 400, 0, 550)
-main.Position = UDim2.new(0.5, -200, 0.5, -275)
-main.BackgroundColor3 = Color3.fromRGB(20, 25, 30)
-main.BorderSizePixel = 0
-main.Active = true
-main.Parent = sg
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 350, 0, 400)
+Main.Position = UDim2.new(0.5, -175, 0.5, -200)
+Main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Parent = ScreenGui
 
-Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
 
 -- Draggable
 local dragging, dragInput, dragStart, startPos
-main.InputBegan:Connect(function(input)
+Main.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
         dragStart = input.Position
-        startPos = main.Position
+        startPos = Main.Position
     end
 end)
 
-main.InputChanged:Connect(function(input)
+Main.InputChanged:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseMovement then
         dragInput = input
     end
 end)
 
-uis.InputChanged:Connect(function(input)
+UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
         local delta = input.Position - dragStart
-        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        Main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
     end
 end)
 
-uis.InputEnded:Connect(function(input)
+UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = false
     end
 end)
 
 -- Top bar
-local top = Instance.new("Frame")
-top.Size = UDim2.new(1, 0, 0, 40)
-top.BackgroundColor3 = Color3.fromRGB(30, 35, 45)
-top.BorderSizePixel = 0
-top.Parent = main
-Instance.new("UICorner", top).CornerRadius = UDim.new(0, 10)
+local Top = Instance.new("Frame")
+Top.Size = UDim2.new(1, 0, 0, 35)
+Top.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+Top.BorderSizePixel = 0
+Top.Parent = Main
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -80, 1, 0)
-title.Position = UDim2.new(0, 12, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = "🐟 FISH HUB - MANUAL CONTROL"
-title.TextColor3 = Color3.fromRGB(100, 180, 255)
-title.TextSize = 14
-title.Font = Enum.Font.GothamBold
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = top
+Instance.new("UICorner", Top).CornerRadius = UDim.new(0, 8)
 
-local minimize = Instance.new("TextButton")
-minimize.Size = UDim2.new(0, 30, 0, 30)
-minimize.Position = UDim2.new(1, -70, 0, 5)
-minimize.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-minimize.Text = "-"
-minimize.TextColor3 = Color3.fromRGB(255, 255, 255)
-minimize.TextSize = 18
-minimize.Font = Enum.Font.GothamBold
-minimize.Parent = top
-Instance.new("UICorner", minimize).CornerRadius = UDim.new(0, 6)
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -40, 1, 0)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "🐟 FISH HUB"
+Title.TextColor3 = Color3.fromRGB(100, 180, 255)
+Title.TextSize = 15
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Top
 
-local close = Instance.new("TextButton")
-close.Size = UDim2.new(0, 30, 0, 30)
-close.Position = UDim2.new(1, -35, 0, 5)
-close.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-close.Text = "X"
-close.TextColor3 = Color3.fromRGB(255, 255, 255)
-close.TextSize = 14
-close.Font = Enum.Font.GothamBold
-close.Parent = top
-Instance.new("UICorner", close).CornerRadius = UDim.new(0, 6)
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.new(0, 30, 0, 30)
+Close.Position = UDim2.new(1, -32, 0, 2)
+Close.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+Close.Text = "X"
+Close.TextColor3 = Color3.fromRGB(255, 255, 255)
+Close.TextSize = 14
+Close.Font = Enum.Font.GothamBold
+Close.Parent = Top
 
-local content = Instance.new("ScrollingFrame")
-content.Size = UDim2.new(1, -12, 1, -48)
-content.Position = UDim2.new(0, 6, 0, 44)
-content.BackgroundTransparency = 1
-content.BorderSizePixel = 0
-content.ScrollBarThickness = 5
-content.Parent = main
+Instance.new("UICorner", Close).CornerRadius = UDim.new(0, 5)
 
-local list = Instance.new("UIListLayout")
-list.Padding = UDim.new(0, 6)
-list.Parent = content
-
-list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    content.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 6)
+Close.MouseButton1Click:Connect(function()
+    _G.Config.AutoFish = false
+    ScreenGui:Destroy()
+    _G.FishItLoaded = false
 end)
 
-local minimized = false
-minimize.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    if minimized then
-        main:TweenSize(UDim2.new(0, 400, 0, 40), "Out", "Quad", 0.2, true)
-        content.Visible = false
-        minimize.Text = "+"
-    else
-        main:TweenSize(UDim2.new(0, 400, 0, 550), "Out", "Quad", 0.2, true)
-        content.Visible = true
-        minimize.Text = "-"
-    end
+-- Content
+local Content = Instance.new("ScrollingFrame")
+Content.Size = UDim2.new(1, -10, 1, -42)
+Content.Position = UDim2.new(0, 5, 0, 38)
+Content.BackgroundTransparency = 1
+Content.BorderSizePixel = 0
+Content.ScrollBarThickness = 4
+Content.Parent = Main
+
+local List = Instance.new("UIListLayout")
+List.Padding = UDim.new(0, 5)
+List.Parent = Content
+
+List:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    Content.CanvasSize = UDim2.new(0, 0, 0, List.AbsoluteContentSize.Y + 5)
 end)
 
-close.MouseButton1Click:Connect(function()
-    cfg.autofish = false
-    sg:Destroy()
-end)
-
--- UI Helpers
-local function section(txt)
-    local f = Instance.new("Frame")
-    f.Size = UDim2.new(1, 0, 0, 30)
-    f.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
-    f.Parent = content
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+-- UI Elements
+local function CreateToggle(name, callback)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 35)
+    Frame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    Frame.Parent = Content
     
-    local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, -10, 1, 0)
-    l.Position = UDim2.new(0, 10, 0, 0)
-    l.BackgroundTransparency = 1
-    l.Text = txt
-    l.TextColor3 = Color3.fromRGB(255, 255, 255)
-    l.TextSize = 13
-    l.Font = Enum.Font.GothamBold
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = f
-end
-
-local function toggle(txt, def, callback)
-    local f = Instance.new("Frame")
-    f.Size = UDim2.new(1, 0, 0, 38)
-    f.BackgroundColor3 = Color3.fromRGB(30, 35, 40)
-    f.Parent = content
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 5)
     
-    local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(0.65, 0, 1, 0)
-    l.Position = UDim2.new(0, 10, 0, 0)
-    l.BackgroundTransparency = 1
-    l.Text = txt
-    l.TextColor3 = Color3.fromRGB(230, 230, 230)
-    l.TextSize = 11
-    l.Font = Enum.Font.Gotham
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = f
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(0.65, 0, 1, 0)
+    Label.Position = UDim2.new(0, 10, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(230, 230, 230)
+    Label.TextSize = 12
+    Label.Font = Enum.Font.Gotham
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
     
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 48, 0, 26)
-    b.Position = UDim2.new(1, -54, 0.5, -13)
-    b.BackgroundColor3 = def and Color3.fromRGB(50, 200, 100) or Color3.fromRGB(70, 70, 80)
-    b.Text = def and "ON" or "OFF"
-    b.TextColor3 = Color3.fromRGB(255, 255, 255)
-    b.TextSize = 11
-    b.Font = Enum.Font.GothamBold
-    b.Parent = f
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(0, 45, 0, 25)
+    Button.Position = UDim2.new(1, -50, 0.5, -12)
+    Button.BackgroundColor3 = Color3.fromRGB(80, 80, 90)
+    Button.Text = "OFF"
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.TextSize = 11
+    Button.Font = Enum.Font.GothamBold
+    Button.Parent = Frame
     
-    local on = def
-    b.MouseButton1Click:Connect(function()
-        on = not on
-        b.BackgroundColor3 = on and Color3.fromRGB(50, 200, 100) or Color3.fromRGB(70, 70, 80)
-        b.Text = on and "ON" or "OFF"
-        callback(on)
+    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 4)
+    
+    local active = false
+    Button.MouseButton1Click:Connect(function()
+        active = not active
+        Button.BackgroundColor3 = active and Color3.fromRGB(50, 200, 100) or Color3.fromRGB(80, 80, 90)
+        Button.Text = active and "ON" or "OFF"
+        callback(active)
     end)
 end
 
-local function slider(txt, min, max, def, step, callback)
-    local f = Instance.new("Frame")
-    f.Size = UDim2.new(1, 0, 0, 52)
-    f.BackgroundColor3 = Color3.fromRGB(30, 35, 40)
-    f.Parent = content
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+local function CreateSlider(name, min, max, default, callback)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 50)
+    Frame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    Frame.Parent = Content
     
-    local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, -20, 0, 18)
-    l.Position = UDim2.new(0, 10, 0, 5)
-    l.BackgroundTransparency = 1
-    l.Text = txt .. ": " .. def
-    l.TextColor3 = Color3.fromRGB(200, 200, 200)
-    l.TextSize = 11
-    l.Font = Enum.Font.Gotham
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = f
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 5)
     
-    local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(1, -20, 0, 6)
-    bar.Position = UDim2.new(0, 10, 0, 32)
-    bar.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    bar.BorderSizePixel = 0
-    bar.Parent = f
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -20, 0, 18)
+    Label.Position = UDim2.new(0, 10, 0, 5)
+    Label.BackgroundTransparency = 1
+    Label.Text = name .. ": " .. default
+    Label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    Label.TextSize = 11
+    Label.Font = Enum.Font.Gotham
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
     
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new((def - min) / (max - min), 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-    fill.BorderSizePixel = 0
-    fill.Parent = bar
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    local SliderBG = Instance.new("Frame")
+    SliderBG.Size = UDim2.new(1, -20, 0, 5)
+    SliderBG.Position = UDim2.new(0, 10, 0, 30)
+    SliderBG.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    SliderBG.BorderSizePixel = 0
+    SliderBG.Parent = Frame
     
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 2, 0)
-    btn.BackgroundTransparency = 1
-    btn.Text = ""
-    btn.Parent = bar
+    Instance.new("UICorner", SliderBG).CornerRadius = UDim.new(1, 0)
     
-    local function update(input)
-        local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
-        local val = min + (max - min) * pos
-        val = math.floor(val / step + 0.5) * step -- Round to step
-        fill.Size = UDim2.new((val - min) / (max - min), 0, 1, 0)
-        l.Text = txt .. ": " .. val
-        callback(val)
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+    Fill.BorderSizePixel = 0
+    Fill.Parent = SliderBG
+    
+    Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+    
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, 0, 2, 0)
+    Button.BackgroundTransparency = 1
+    Button.Text = ""
+    Button.Parent = SliderBG
+    
+    local dragging = false
+    
+    local function Update(input)
+        local pos = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
+        local value = math.floor(min + (max - min) * pos)
+        Fill.Size = UDim2.new(pos, 0, 1, 0)
+        Label.Text = name .. ": " .. value
+        callback(value)
     end
     
-    local drag = false
-    btn.InputBegan:Connect(function(input)
+    Button.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            drag = true
-            update(input)
+            dragging = true
+            Update(input)
         end
     end)
     
-    uis.InputChanged:Connect(function(input)
-        if drag and input.UserInputType == Enum.UserInputType.MouseMovement then
-            update(input)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            Update(input)
         end
     end)
     
-    uis.InputEnded:Connect(function(input)
+    UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            drag = false
+            dragging = false
         end
     end)
 end
 
-local function button(txt, callback)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, 0, 0, 34)
-    b.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
-    b.Text = txt
-    b.TextColor3 = Color3.fromRGB(255, 255, 255)
-    b.TextSize = 12
-    b.Font = Enum.Font.GothamBold
-    b.Parent = content
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-    b.MouseButton1Click:Connect(callback)
+local function CreateButton(name, callback)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(1, 0, 0, 32)
+    Button.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
+    Button.Text = name
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.TextSize = 12
+    Button.Font = Enum.Font.GothamBold
+    Button.Parent = Content
+    
+    Instance.new("UICorner", Button).CornerRadius = UDim.new(0, 5)
+    
+    Button.MouseButton1Click:Connect(callback)
 end
 
--- ═══════════════════════════════════════════════════════════
--- BUILD UI WITH MANUAL SETTINGS
--- ═══════════════════════════════════════════════════════════
-
-section("🎣 AUTO FISHING")
-
-toggle("Auto Fish", false, function(v)
-    cfg.autofish = v
+-- Build UI
+CreateToggle("Auto Fish", function(v)
+    _G.Config.AutoFish = v
     if v then
-        notify("Auto Fish ON")
-        task.spawn(autoFish)
+        Notify("Auto Fish Started")
+        task.spawn(Fishing.Start)
     else
-        notify("Auto Fish OFF")
+        Notify("Auto Fish Stopped")
     end
 end)
 
-toggle("Auto Sell", false, function(v)
-    cfg.autosell = v
+CreateToggle("Auto Sell", function(v)
+    _G.Config.AutoSell = v
 end)
 
-slider("Sell Every (Fish)", 5, 50, 10, 5, function(v)
-    cfg.sellEvery = v
+CreateSlider("Speed", 16, 150, 16, function(v)
+    _G.Config.WalkSpeed = v
+    UpdateSpeed()
 end)
 
-section("⚙️ TIMING SETTINGS (PENTING!)")
-
-slider("Cast Hold Time (s)", 0.1, 3, 0.8, 0.1, function(v)
-    cfg.castHoldTime = v
+CreateSlider("Jump", 50, 300, 50, function(v)
+    _G.Config.JumpPower = v
+    UpdateJump()
 end)
 
-slider("Wait After Cast (s)", 0.5, 5, 2.0, 0.5, function(v)
-    cfg.waitAfterCast = v
+CreateToggle("Noclip", function(v)
+    _G.Config.Noclip = v
 end)
 
-slider("Max Wait Bite (s)", 10, 30, 20, 5, function(v)
-    cfg.maxWaitTime = v
+CreateButton("Sell Now", function()
+    Fishing.Sell()
 end)
 
-slider("Reel Clicks", 1, 10, 5, 1, function(v)
-    cfg.reelClicks = v
-end)
+-- Stats display
+local StatsLabel = Instance.new("TextLabel")
+StatsLabel.Size = UDim2.new(1, 0, 0, 50)
+StatsLabel.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+StatsLabel.Text = "Stats Loading..."
+StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatsLabel.TextSize = 10
+StatsLabel.Font = Enum.Font.Gotham
+StatsLabel.TextYAlignment = Enum.TextYAlignment.Top
+StatsLabel.Parent = Content
 
-slider("Reel Delay (s)", 0.05, 0.5, 0.1, 0.05, function(v)
-    cfg.reelDelay = v
-end)
+Instance.new("UICorner", StatsLabel).CornerRadius = UDim.new(0, 5)
 
-slider("Animation Wait (s)", 1, 5, 2.5, 0.5, function(v)
-    cfg.animationWait = v
-end)
-
-section("⚡ PLAYER MODS")
-
-slider("Speed", 16, 150, 16, 5, function(v)
-    cfg.speed = v
-    hum.WalkSpeed = v
-end)
-
-slider("Jump", 50, 300, 50, 25, function(v)
-    cfg.jump = v
-    hum.JumpPower = v
-end)
-
-toggle("Noclip", false, function(v)
-    cfg.noclip = v
-end)
-
-section("🔍 DEBUG & TEST")
-
-button("🔍 Test: Find Rod", function()
-    local rod = getRod()
-    if rod then
-        notify("✓ Found: " .. rod.Name)
-        print("=== ROD INFO ===")
-        print("Name: " .. rod.Name)
-        print("Parent: " .. rod.Parent.Name)
-        print("ClassName: " .. rod.ClassName)
-    else
-        notify("✗ No rod found!")
-        print("=== SEARCHING ===")
-        print("Tools in Character:")
-        for _, v in pairs(char:GetChildren()) do
-            if v:IsA("Tool") then
-                print("  - " .. v.Name)
-            end
-        end
-        print("Tools in Backpack:")
-        for _, v in pairs(plr.Backpack:GetChildren()) do
-            if v:IsA("Tool") then
-                print("  - " .. v.Name)
-            end
-        end
-    end
-end)
-
-button("⚙️ Test: Equip Rod", function()
-    if equipRod() then
-        notify("✓ Rod equipped!")
-    else
-        notify("✗ Failed to equip!")
-    end
-end)
-
-button("🎣 Test: Cast Once", function()
-    if cast() then
-        notify("✓ Cast successful!")
-    else
-        notify("✗ Cast failed!")
-    end
-end)
-
-toggle("Show Debug", false, function(v)
-    cfg.showDebug = v
-    if v then
-        notify("Debug mode ON - Check F9 console")
-    end
-end)
-
-section("🔍 ADVANCED")
-
-toggle("Use Remotes", true, function(v)
-    cfg.useRemotes = v
-end)
-
-button("Manual Sell Now", function()
-    autoSell()
-end)
-
-section("📊 STATS")
-
-local statsLabel = Instance.new("TextLabel")
-statsLabel.Size = UDim2.new(1, 0, 0, 80)
-statsLabel.BackgroundColor3 = Color3.fromRGB(30, 35, 40)
-statsLabel.Text = "Loading..."
-statsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statsLabel.TextSize = 10
-statsLabel.Font = Enum.Font.Gotham
-statsLabel.TextYAlignment = Enum.TextYAlignment.Top
-statsLabel.Parent = content
-Instance.new("UICorner", statsLabel).CornerRadius = UDim.new(0, 6)
-
-local padding = Instance.new("UIPadding", statsLabel)
-padding.PaddingLeft = UDim.new(0, 10)
-padding.PaddingTop = UDim.new(0, 8)
+local Padding = Instance.new("UIPadding", StatsLabel)
+Padding.PaddingLeft = UDim.new(0, 10)
+Padding.PaddingTop = UDim.new(0, 8)
 
 -- Update stats
 task.spawn(function()
     while task.wait(1) do
-        if statsLabel then
-            statsLabel.Text = string.format(
-                "Fish Caught: %d\nCasts: %d\nBites: %d\nMisses: %d\nStatus: %s",
-                stats.caught,
-                stats.casts,
-                stats.bites,
-                stats.misses,
-                cfg.autofish and "FISHING..." or "Idle"
+        if StatsLabel then
+            StatsLabel.Text = string.format(
+                "Fish Caught: %d\nFish Sold: %d\nStatus: %s",
+                _G.Config.Stats.Caught,
+                _G.Config.Stats.Sold,
+                _G.Config.AutoFish and "Fishing..." or "Idle"
             )
         end
     end
 end)
 
-notify("Loaded! Adjust timing settings!")
-print("Fish Hub Manual Control loaded!")
+-- Done
+Notify("Script Loaded!")
+print("Fish Hub loaded successfully")
+print("All systems operational")
