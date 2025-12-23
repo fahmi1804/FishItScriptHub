@@ -94,20 +94,24 @@ end
 -- FISHING FUNCTIONS - MANUAL CONTROL
 -- ═══════════════════════════════════════════════════════════
 
--- Get rod
+-- Get rod (FIXED - More lenient detection)
 local function getRod()
-    -- Check equipped first
+    -- Method 1: Check what's currently equipped (PRIORITAS TERTINGGI)
+    local equippedTool = char:FindFirstChildOfClass("Tool")
+    if equippedTool then
+        debug("Found equipped tool: " .. equippedTool.Name)
+        return equippedTool -- Return ANY equipped tool
+    end
+    
+    -- Method 2: Check all tools in character
     for _, v in pairs(char:GetChildren()) do
         if v:IsA("Tool") then
-            local n = v.Name:lower()
-            if n:match("rod") or n:match("fish") or n:match("pole") or n:match("element") then
-                debug("Found equipped rod: " .. v.Name)
-                return v
-            end
+            debug("Found tool in character: " .. v.Name)
+            return v
         end
     end
     
-    -- Check backpack
+    -- Method 3: Check backpack with specific names
     for _, v in pairs(plr.Backpack:GetChildren()) do
         if v:IsA("Tool") then
             local n = v.Name:lower()
@@ -118,56 +122,93 @@ local function getRod()
         end
     end
     
+    -- Method 4: Just get ANY tool from backpack
+    for _, v in pairs(plr.Backpack:GetChildren()) do
+        if v:IsA("Tool") then
+            debug("Found any tool in backpack: " .. v.Name)
+            return v
+        end
+    end
+    
+    debug("ERROR: No tool found anywhere!")
     return nil
 end
 
--- Equip rod
+-- Equip rod (SIMPLIFIED)
 local function equipRod()
     local rod = getRod()
     if rod then
+        debug("Rod found: " .. rod.Name .. " (Parent: " .. rod.Parent.Name .. ")")
+        
+        -- If rod is in backpack, equip it
         if rod.Parent == plr.Backpack then
-            debug("Equipping rod...")
+            debug("Equipping rod from backpack...")
             hum:EquipTool(rod)
-            task.wait(0.5)
+            task.wait(0.8) -- Longer wait for equip
         end
-        return true
+        
+        -- Verify it's equipped
+        local equipped = char:FindFirstChildOfClass("Tool")
+        if equipped then
+            debug("✓ Rod equipped successfully: " .. equipped.Name)
+            return true
+        else
+            debug("✗ Rod not equipped after attempt")
+            return false
+        end
+    else
+        debug("✗ No rod found!")
+        return false
     end
-    debug("No rod found!")
-    return false
 end
 
--- Cast dengan timing yang bisa diatur
+-- Cast dengan timing yang bisa diatur (FIXED)
 local function cast()
     local rod = getRod()
-    if not rod or rod.Parent ~= char then
-        debug("Rod not equipped!")
+    
+    if not rod then
+        debug("✗ Cast failed: No rod found!")
         return false
     end
     
-    debug("Casting... Hold time: " .. cfg.castHoldTime .. "s")
+    -- Check if rod is equipped
+    if rod.Parent ~= char then
+        debug("✗ Cast failed: Rod not equipped! (Parent: " .. rod.Parent.Name .. ")")
+        return false
+    end
+    
+    debug("✓ Casting with: " .. rod.Name .. " | Hold time: " .. cfg.castHoldTime .. "s")
     
     -- Method 1: Tool activation
     pcall(function()
         rod:Activate()
+        debug("  - Tool:Activate() called")
     end)
     
-    -- Method 2: Mouse hold (ADJUSTABLE)
-    mouse1press()
-    task.wait(cfg.castHoldTime) -- SETTING MANUAL
-    mouse1release()
+    -- Method 2: Mouse hold (PRIMARY METHOD)
+    task.spawn(function()
+        mouse1press()
+        debug("  - Mouse pressed")
+        task.wait(cfg.castHoldTime)
+        mouse1release()
+        debug("  - Mouse released after " .. cfg.castHoldTime .. "s")
+    end)
     
     -- Method 3: Try fire remotes if enabled
     if cfg.useRemotes then
-        pcall(function()
-            for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                if v:IsA("RemoteEvent") then
-                    local n = v.Name:lower()
-                    if n:match("cast") or n:match("throw") or n:match("fish") then
-                        v:FireServer()
-                        debug("Fired remote: " .. v.Name)
+        task.spawn(function()
+            task.wait(0.1) -- Small delay
+            pcall(function()
+                for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+                    if v:IsA("RemoteEvent") then
+                        local n = v.Name:lower()
+                        if n:match("cast") or n:match("throw") or n:match("fish") or n:match("start") then
+                            v:FireServer()
+                            debug("  - Fired remote: " .. v.Name)
+                        end
                     end
                 end
-            end
+            end)
         end)
     end
     
@@ -733,14 +774,61 @@ toggle("Noclip", false, function(v)
     cfg.noclip = v
 end)
 
-section("🔍 ADVANCED")
+section("🔍 DEBUG & TEST")
 
-toggle("Use Remotes", true, function(v)
-    cfg.useRemotes = v
+button("🔍 Test: Find Rod", function()
+    local rod = getRod()
+    if rod then
+        notify("✓ Found: " .. rod.Name)
+        print("=== ROD INFO ===")
+        print("Name: " .. rod.Name)
+        print("Parent: " .. rod.Parent.Name)
+        print("ClassName: " .. rod.ClassName)
+    else
+        notify("✗ No rod found!")
+        print("=== SEARCHING ===")
+        print("Tools in Character:")
+        for _, v in pairs(char:GetChildren()) do
+            if v:IsA("Tool") then
+                print("  - " .. v.Name)
+            end
+        end
+        print("Tools in Backpack:")
+        for _, v in pairs(plr.Backpack:GetChildren()) do
+            if v:IsA("Tool") then
+                print("  - " .. v.Name)
+            end
+        end
+    end
+end)
+
+button("⚙️ Test: Equip Rod", function()
+    if equipRod() then
+        notify("✓ Rod equipped!")
+    else
+        notify("✗ Failed to equip!")
+    end
+end)
+
+button("🎣 Test: Cast Once", function()
+    if cast() then
+        notify("✓ Cast successful!")
+    else
+        notify("✗ Cast failed!")
+    end
 end)
 
 toggle("Show Debug", false, function(v)
     cfg.showDebug = v
+    if v then
+        notify("Debug mode ON - Check F9 console")
+    end
+end)
+
+section("🔍 ADVANCED")
+
+toggle("Use Remotes", true, function(v)
+    cfg.useRemotes = v
 end)
 
 button("Manual Sell Now", function()
